@@ -1,0 +1,10 @@
+checklist
+  add     [task_name] [relative_start_date] [interval](optional, once)
+  remove  [task_name]
+  list
+  check   [task_name] 
+  uncheck [task_name]
+
+  Checklist files:
+
+  task_name,due_date,interval
