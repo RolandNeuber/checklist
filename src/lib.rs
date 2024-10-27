@@ -5,9 +5,10 @@ use regex::Regex;
 use once_cell::sync::Lazy;
 use std::string::ToString;
 use std::cmp;
-use const_str;
+use chrono::{Local, NaiveDate};
+use colored::Colorize;
 
-const DATE_REGEX: Lazy<Regex> = regex_static::lazy_regex!(r"^\d\d\d\d-\d\d-\d\d$");
+// const DATE_REGEX: Lazy<Regex> = regex_static::lazy_regex!(r"^\d\d\d\d-\d\d-\d\d$");
 
 pub struct Config {
     file_path: String,
@@ -33,20 +34,25 @@ impl Config {
 
 struct TaskEntry {
     task_name: String,
-    due_date: String,
+    due_date: NaiveDate,
     interval: u32,
 }
 
 impl TaskEntry {
+    fn serialize(&self) -> String {
+        format!("{},{},{}", &self.task_name, &self.due_date, if self.interval == 0 {&0} else {&self.interval})
+    }
+
     fn deserialize(serialization: &str) -> Result<TaskEntry, String> {
         let v: Vec<&str> = serialization.split(',').collect();
         if v.len() != 3 {
             return Err("incorrect number of arguments for deserialization, expected 3".to_string());
         }
 
-        if !DATE_REGEX.is_match(&v[1]) {
-            return Err("due date must be a date in the format yyyy-mm-dd".to_string());
-        }
+        let due_date = match NaiveDate::parse_from_str(&v[1], "%Y-%m-%d") {
+            Ok(date) => date,
+            Err(e) => return Err(e.to_string())
+        };
 
         let interval = match v[2].parse::<u32>() {
             Ok(content) => content,
@@ -55,22 +61,29 @@ impl TaskEntry {
 
         Ok(TaskEntry {
             task_name: v[0].to_string(),
-            due_date: v[1].to_string(),
+            due_date,
             interval
         })
     }
 
     fn build(task_name: String, due_date: String, interval: u32) 
-        -> Result<TaskEntry, &'static str> {
+        -> Result<TaskEntry, String> {
         if task_name.contains(',') {
-            return Err("task name must not contain commas");
+            return Err("task name must not contain commas".to_string());
         }
 
         // let re = Regex::new(r"^\d\d\d\d-\d\d-\d\d$").expect("invalid regex");
-
+        
+        /*
         if !DATE_REGEX.is_match(&due_date) {
-            return Err("due date must be a date in the format yyyy-mm-dd");
+            return Err("due date must be a date in the format yyyy-mm-dd".to_string());
         }
+        */
+
+        let due_date = match NaiveDate::parse_from_str(&due_date, "%Y-%m-%d") {
+            Ok(date) => date,
+            Err(e) => return Err(e.to_string())
+        };
 
         Ok(TaskEntry {
             task_name,
@@ -84,7 +97,7 @@ impl TaskEntry {
             "{:width1$} {:width2$} {:width3$}", 
             &self.task_name, 
             &self.due_date,
-            &self.interval, 
+            if self.interval == 0 {"once".to_string()} else {format!("{}", &self.interval)}, 
             width1=column_width[0], 
             width2=column_width[1], 
             width3=column_width[2]
@@ -131,18 +144,10 @@ fn add(config: Config) -> Result<(), String> {
     } else {
         &config.args[2]
     };
+    
+    let entry = TaskEntry::deserialize(format!("{},{},{}", &config.args[0], &config.args[1], if interval == "once" {"0"} else {interval}).as_str())?;
 
-    let res = fs::write(
-        config.file_path, 
-        format!(
-            "{},{},{}",
-            config.args[0], 
-            config.args[1], 
-            interval
-        )
-    );
-
-    match res {
+    match fs::write(config.file_path, entry.serialize()) {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string())
     }
@@ -210,8 +215,15 @@ fn list(config: Config) -> Result<(), String> {
         width3=length[2]
     );
     println!("{}", "-".repeat(length.iter().sum::<usize>() + 2));
+    let now = Local::now().date_naive();
     for line in checklist.lines() {
-        println!("{}", TaskEntry::deserialize(line)?.as_table_entry(length));
+        let entry = TaskEntry::deserialize(line)?;
+        if (entry.due_date < now) {
+            println!("{}", entry.as_table_entry(length).red().bold());
+        }
+        else {
+            println!("{}", entry.as_table_entry(length));
+        }
     }
 
     Ok(())
