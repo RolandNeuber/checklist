@@ -1,15 +1,12 @@
 use std::env;
 use std::fs;
 use std::io::Error;
-use regex::Regex;
-use once_cell::sync::Lazy;
 use std::string::ToString;
 use std::cmp;
-use chrono::{Local, NaiveDate};
+use chrono::{Local, NaiveDate, Duration};
 use colored::Colorize;
 
-// const DATE_REGEX: Lazy<Regex> = regex_static::lazy_regex!(r"^\d\d\d\d-\d\d-\d\d$");
-
+#[derive(Clone)]
 pub struct Config {
     file_path: String,
     args: Vec<String>,
@@ -65,20 +62,13 @@ impl TaskEntry {
             interval
         })
     }
-
+    
+    #[warn(dead_code)]
     fn build(task_name: String, due_date: String, interval: u32) 
         -> Result<TaskEntry, String> {
         if task_name.contains(',') {
             return Err("task name must not contain commas".to_string());
         }
-
-        // let re = Regex::new(r"^\d\d\d\d-\d\d-\d\d$").expect("invalid regex");
-        
-        /*
-        if !DATE_REGEX.is_match(&due_date) {
-            return Err("due date must be a date in the format yyyy-mm-dd".to_string());
-        }
-        */
 
         let due_date = match NaiveDate::parse_from_str(&due_date, "%Y-%m-%d") {
             Ok(date) => date,
@@ -116,10 +106,6 @@ impl ToString for TaskEntry {
     }
 }
 
-fn run(command: Result<fn(config: Config) -> Result<(), &'static str>, &'static str>, config: Config) -> Result<(), &'static str> {
-    Ok(())
-}
-
 pub fn parse_command(command_str: &str) 
     -> Result<fn(config: Config) -> Result<(), String>, &'static str> {
         
@@ -135,8 +121,26 @@ pub fn parse_command(command_str: &str)
 
 fn add(config: Config) -> Result<(), String> {
     // add     [task_name] [relative_start_date] [interval](optional, once)
+    
     if config.args.len() < 2 {
         return Err("not enough parameters".to_string());
+    }
+
+    let checklist: Result<String, Error> = fs::read_to_string(&config.file_path);
+    let checklist: String = match checklist {
+        Ok(content) => content,
+        Err(e) => return Err(e.to_string())
+    };
+
+    let mut found = false;
+    for line in checklist.lines() {
+        if line.starts_with(format!("{}{}", config.args[0], ',').as_str()) {
+            found = true;
+        }
+    }
+
+    if found {
+        return Err(format!("entry with name {} already exists", config.args[0]))
     }
     
     let interval = if config.args.len() < 3 {
@@ -147,7 +151,7 @@ fn add(config: Config) -> Result<(), String> {
     
     let entry = TaskEntry::deserialize(format!("{},{},{}", &config.args[0], &config.args[1], if interval == "once" {"0"} else {interval}).as_str())?;
 
-    match fs::write(config.file_path, entry.serialize()) {
+    match fs::write(config.file_path, format!("{}\n{}", entry.serialize(), checklist)) {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string())
     }
@@ -167,10 +171,14 @@ fn remove(config: Config) -> Result<(), String> {
 
     let mut new_checklist = String::new();
     let mut found = false;
+    let mut first_line = true;
     for line in checklist.lines() {
         if !line.starts_with(format!("{}{}", config.args[0], ',').as_str()) {
+            if !first_line {
+                new_checklist.push_str("\n");
+            }
             new_checklist.push_str(line);
-            break;
+            first_line = false;
         }
         else {
             found = true;
@@ -181,7 +189,9 @@ fn remove(config: Config) -> Result<(), String> {
         return Err(format!("cannot find task named \"{}\"", config.args[0]));
     }
 
-    let res = fs::write(config.file_path, new_checklist);
+    if let Err(e) = fs::write(config.file_path, new_checklist) {
+        return Err(e.to_string());
+    };
 
     Ok(())
 }
@@ -218,7 +228,7 @@ fn list(config: Config) -> Result<(), String> {
     let now = Local::now().date_naive();
     for line in checklist.lines() {
         let entry = TaskEntry::deserialize(line)?;
-        if (entry.due_date < now) {
+        if entry.due_date < now {
             println!("{}", entry.as_table_entry(length).red().bold());
         }
         else {
@@ -234,6 +244,52 @@ fn check(config: Config) -> Result<(), String> {
     if config.args.len() < 1 {
         return Err("not enough parameters".to_string());
     }
+
+    let checklist: Result<String, Error> = fs::read_to_string(&config.file_path);
+    let checklist: String = match checklist {
+        Ok(content) => content,
+        Err(e) => return Err(e.to_string())
+    };
+
+    let mut found = false;
+    let mut entry = TaskEntry { 
+        task_name: config.args[0].clone(), 
+        due_date: Local::now().naive_local().into(), 
+        interval: 0 
+    }; // defaults, so compiler does not complain
+    
+    for line in checklist.lines() {
+        if line.starts_with(format!("{}{}", config.args[0], ',').as_str()) {
+            found = true;
+            entry = TaskEntry::deserialize(line)?;
+        }
+    }
+
+    if !found {
+        return Err(format!("cannot find task named \"{}\"", config.args[0]));
+    }
+
+    remove(config.clone())?;
+
+    if entry.interval == 0 {
+        return Ok(());
+    }
+
+    let today: NaiveDate = Local::now().naive_local().into();
+    let new_due_date = match today.checked_add_signed(Duration::days(entry.interval.into())) {
+        Some(content) => content,
+        None => return Err("could not calculate new due date".to_string())
+    };
+
+    add(Config {
+        file_path: config.file_path,
+        args: vec!(
+            config.args[0].clone(), // task_name
+            new_due_date.to_string(), // due_date
+            entry.interval.to_string(), // interval
+        ),
+    })?;
+
     Ok(())
 }
 
