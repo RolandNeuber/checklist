@@ -106,6 +106,37 @@ impl ToString for TaskEntry {
     }
 }
 
+struct TaskTable {
+    tasks: Vec<TaskEntry>
+}
+
+impl TaskTable {
+    fn serialize(&self) -> String {
+        let mut length: [usize; 3] = [0; 3];
+        for entry in &self.tasks {
+            length[0] = cmp::max(length[0], entry.task_name.len());
+            length[1] = cmp::max(length[1], entry.due_date.to_string().len());
+            length[2] = cmp::max(length[2], entry.interval.to_string().len());
+        } 
+
+        let mut serialization = String::new();
+        for task in &self.tasks {
+            serialization = format!("{}\n{}", serialization, task.as_table_entry(length));
+        }
+
+        serialization.to_string()
+    }
+
+    fn deserialize(serialization: &str) -> Result<TaskTable, String> {
+        let mut tasks = vec![];
+        for line in serialization.lines() {
+            tasks.push(TaskEntry::deserialize(line)?);
+        }
+
+        Ok(TaskTable { tasks })
+    }
+}
+
 pub fn parse_command(command_str: &str) 
     -> Result<fn(config: Config) -> Result<(), String>, &'static str> {
         
@@ -194,6 +225,43 @@ fn remove(config: Config) -> Result<(), String> {
     };
 
     Ok(())
+}
+
+fn pop(file_path: &str, task_name: &str) -> Result<TaskEntry, String> {
+    // remove  [task_name]
+    let checklist: Result<String, Error> = fs::read_to_string(&file_path);
+    let checklist: String = match checklist {
+        Ok(content) => content,
+        Err(e) => return Err(e.to_string())
+    };
+
+    let mut new_checklist = String::new();
+    let mut found = false;
+    let mut first_line = true;
+    let mut entry = "";
+    for line in checklist.lines() {
+        if !line.starts_with(format!("{}{}", task_name, ',').as_str()) {
+            if !first_line {
+                new_checklist.push_str("\n");
+            }
+            new_checklist.push_str(line);
+            first_line = false;
+        }
+        else {
+            found = true;
+            entry = line;
+        }
+    }
+    
+    if !found {
+        return Err(format!("cannot find task named \"{}\"", task_name));
+    }
+
+    if let Err(e) = fs::write(file_path, new_checklist) {
+        return Err(e.to_string());
+    };
+
+    Ok(TaskEntry::deserialize(entry)?)
 }
 
 fn list(config: Config) -> Result<(), String> {
