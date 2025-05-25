@@ -1,5 +1,5 @@
-use std::process;
 use std::env;
+use std::process;
 
 use checklist::Config;
 
@@ -28,4 +28,3 @@ fn main() {
         process::exit(1);
     }
 }
-

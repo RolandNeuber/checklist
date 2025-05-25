@@ -1,10 +1,10 @@
+use chrono::{Duration, Local, NaiveDate};
+use colored::Colorize;
+use std::cmp;
 use std::env;
 use std::fs;
 use std::io::Error;
 use std::string::ToString;
-use std::cmp;
-use chrono::{Local, NaiveDate, Duration};
-use colored::Colorize;
 
 #[derive(Clone)]
 pub struct Config {
@@ -14,7 +14,6 @@ pub struct Config {
 
 impl Config {
     pub fn build(mut args: Vec<String>) -> Result<Config, &'static str> {
-        
         let file_path = match env::var("CHECKLIST_FILE") {
             Ok(var) => var,
             Err(msg) => panic!("{msg}"),
@@ -22,10 +21,7 @@ impl Config {
 
         args = args.drain(2..).collect();
 
-        Ok(Config {
-            file_path,
-            args,
-        })
+        Ok(Config { file_path, args })
     }
 }
 
@@ -37,42 +33,52 @@ struct TaskEntry {
 
 impl TaskEntry {
     fn serialize(&self) -> String {
-        format!("{},{},{}", &self.task_name, &self.due_date, if self.interval == 0 {&0} else {&self.interval})
+        format!(
+            "{},{},{}",
+            &self.task_name,
+            &self.due_date,
+            if self.interval == 0 {
+                &0
+            } else {
+                &self.interval
+            }
+        )
     }
 
     fn deserialize(serialization: &str) -> Result<TaskEntry, String> {
         let v: Vec<&str> = serialization.split(',').collect();
         if v.len() != 3 {
-            return Err("incorrect number of arguments for deserialization, expected 3".to_string());
+            return Err(
+                "incorrect number of arguments for deserialization, expected 3".to_string(),
+            );
         }
 
         let due_date = match NaiveDate::parse_from_str(&v[1], "%Y-%m-%d") {
             Ok(date) => date,
-            Err(e) => return Err(e.to_string())
+            Err(e) => return Err(e.to_string()),
         };
 
         let interval = match v[2].parse::<u32>() {
             Ok(content) => content,
-            Err(e) => return Err(e.to_string())
+            Err(e) => return Err(e.to_string()),
         };
 
         Ok(TaskEntry {
             task_name: v[0].to_string(),
             due_date,
-            interval
+            interval,
         })
     }
-    
+
     #[warn(dead_code)]
-    fn build(task_name: String, due_date: String, interval: u32) 
-        -> Result<TaskEntry, String> {
+    fn build(task_name: String, due_date: String, interval: u32) -> Result<TaskEntry, String> {
         if task_name.contains(',') {
             return Err("task name must not contain commas".to_string());
         }
 
         let due_date = match NaiveDate::parse_from_str(&due_date, "%Y-%m-%d") {
             Ok(date) => date,
-            Err(e) => return Err(e.to_string())
+            Err(e) => return Err(e.to_string()),
         };
 
         Ok(TaskEntry {
@@ -84,13 +90,17 @@ impl TaskEntry {
 
     fn as_table_entry(&self, column_width: [usize; 3]) -> String {
         format!(
-            "{:width1$} {:width2$} {:width3$}", 
-            &self.task_name, 
+            "{:width1$} {:width2$} {:width3$}",
+            &self.task_name,
             &self.due_date,
-            if self.interval == 0 {"once".to_string()} else {format!("{}", &self.interval)}, 
-            width1=column_width[0], 
-            width2=column_width[1], 
-            width3=column_width[2]
+            if self.interval == 0 {
+                "once".to_string()
+            } else {
+                format!("{}", &self.interval)
+            },
+            width1 = column_width[0],
+            width2 = column_width[1],
+            width3 = column_width[2]
         )
     }
 }
@@ -98,16 +108,14 @@ impl TaskEntry {
 impl ToString for TaskEntry {
     fn to_string(&self) -> String {
         format!(
-            "Task name: {}, Due until: {}, Interval: {} days", 
-            &self.task_name, 
-            &self.due_date, 
-            &self.interval
+            "Task name: {}, Due until: {}, Interval: {} days",
+            &self.task_name, &self.due_date, &self.interval
         )
     }
 }
 
 struct TaskTable {
-    tasks: Vec<TaskEntry>
+    tasks: Vec<TaskEntry>,
 }
 
 impl TaskTable {
@@ -117,7 +125,7 @@ impl TaskTable {
             length[0] = cmp::max(length[0], entry.task_name.len());
             length[1] = cmp::max(length[1], entry.due_date.to_string().len());
             length[2] = cmp::max(length[2], entry.interval.to_string().len());
-        } 
+        }
 
         let mut serialization = String::new();
         for task in &self.tasks {
@@ -137,22 +145,22 @@ impl TaskTable {
     }
 }
 
-pub fn parse_command(command_str: &str) 
-    -> Result<fn(config: Config) -> Result<(), String>, &'static str> {
-        
+pub fn parse_command(
+    command_str: &str,
+) -> Result<fn(config: Config) -> Result<(), String>, &'static str> {
     match command_str {
-        "add"       => Ok(add),
-        "remove"    => Ok(remove),
-        "list"      => Ok(list),
-        "check"     => Ok(check),
-        "uncheck"   => Ok(uncheck),
-        _           => Err("invalid command"),
+        "add" => Ok(add),
+        "remove" => Ok(remove),
+        "list" => Ok(list),
+        "check" => Ok(check),
+        "uncheck" => Ok(uncheck),
+        _ => Err("invalid command"),
     }
 }
 
 fn add(config: Config) -> Result<(), String> {
     // add     [task_name] [relative_start_date] [interval](optional, once)
-    
+
     if config.args.len() < 2 {
         return Err("not enough parameters".to_string());
     }
@@ -160,7 +168,7 @@ fn add(config: Config) -> Result<(), String> {
     let checklist: Result<String, Error> = fs::read_to_string(&config.file_path);
     let checklist: String = match checklist {
         Ok(content) => content,
-        Err(e) => return Err(e.to_string())
+        Err(e) => return Err(e.to_string()),
     };
 
     let mut found = false;
@@ -171,20 +179,31 @@ fn add(config: Config) -> Result<(), String> {
     }
 
     if found {
-        return Err(format!("entry with name {} already exists", config.args[0]))
+        return Err(format!("entry with name {} already exists", config.args[0]));
     }
-    
+
     let interval = if config.args.len() < 3 {
         "0"
     } else {
         &config.args[2]
     };
-    
-    let entry = TaskEntry::deserialize(format!("{},{},{}", &config.args[0], &config.args[1], if interval == "once" {"0"} else {interval}).as_str())?;
 
-    match fs::write(config.file_path, format!("{}\n{}", entry.serialize(), checklist)) {
+    let entry = TaskEntry::deserialize(
+        format!(
+            "{},{},{}",
+            &config.args[0],
+            &config.args[1],
+            if interval == "once" { "0" } else { interval }
+        )
+        .as_str(),
+    )?;
+
+    match fs::write(
+        config.file_path,
+        format!("{}\n{}", entry.serialize(), checklist),
+    ) {
         Ok(_) => Ok(()),
-        Err(e) => Err(e.to_string())
+        Err(e) => Err(e.to_string()),
     }
 }
 
@@ -193,11 +212,11 @@ fn remove(config: Config) -> Result<(), String> {
     if config.args.len() < 1 {
         return Err("not enough parameters".to_string());
     }
-    
+
     let checklist: Result<String, Error> = fs::read_to_string(&config.file_path);
     let checklist: String = match checklist {
         Ok(content) => content,
-        Err(e) => return Err(e.to_string())
+        Err(e) => return Err(e.to_string()),
     };
 
     let mut new_checklist = String::new();
@@ -210,12 +229,11 @@ fn remove(config: Config) -> Result<(), String> {
             }
             new_checklist.push_str(line);
             first_line = false;
-        }
-        else {
+        } else {
             found = true;
         }
     }
-    
+
     if !found {
         return Err(format!("cannot find task named \"{}\"", config.args[0]));
     }
@@ -232,7 +250,7 @@ fn pop(file_path: &str, task_name: &str) -> Result<TaskEntry, String> {
     let checklist: Result<String, Error> = fs::read_to_string(&file_path);
     let checklist: String = match checklist {
         Ok(content) => content,
-        Err(e) => return Err(e.to_string())
+        Err(e) => return Err(e.to_string()),
     };
 
     let mut new_checklist = String::new();
@@ -246,13 +264,12 @@ fn pop(file_path: &str, task_name: &str) -> Result<TaskEntry, String> {
             }
             new_checklist.push_str(line);
             first_line = false;
-        }
-        else {
+        } else {
             found = true;
             entry = line;
         }
     }
-    
+
     if !found {
         return Err(format!("cannot find task named \"{}\"", task_name));
     }
@@ -265,32 +282,31 @@ fn pop(file_path: &str, task_name: &str) -> Result<TaskEntry, String> {
 }
 
 fn list(config: Config) -> Result<(), String> {
-    // list 
-    let checklist: String = 
-        match fs::read_to_string(&config.file_path) {
-            Ok(content) => content,
-            Err(e) => return Err(e.to_string())
-        };
-    
+    // list
+    let checklist: String = match fs::read_to_string(&config.file_path) {
+        Ok(content) => content,
+        Err(e) => return Err(e.to_string()),
+    };
+
     let mut length: [usize; 3] = [0; 3];
     for line in checklist.lines() {
         let v: Vec<&str> = line.split(',').collect();
         for i in 0..3 {
             length[i] = cmp::max(length[i], v[i].len());
         }
-    }   
+    }
     for i in 0..3 {
         length[i] = cmp::max(length[i], ["task", "due until", "interval"][i].len());
     }
 
     println!(
-        "{:width1$} {:width2$} {:width3$}", 
-        "task", 
-        "due until", 
-        "interval", 
-        width1=length[0], 
-        width2=length[1], 
-        width3=length[2]
+        "{:width1$} {:width2$} {:width3$}",
+        "task",
+        "due until",
+        "interval",
+        width1 = length[0],
+        width2 = length[1],
+        width3 = length[2]
     );
     println!("{}", "-".repeat(length.iter().sum::<usize>() + 2));
     let now = Local::now().date_naive();
@@ -298,8 +314,7 @@ fn list(config: Config) -> Result<(), String> {
         let entry = TaskEntry::deserialize(line)?;
         if entry.due_date < now {
             println!("{}", entry.as_table_entry(length).red().bold());
-        }
-        else {
+        } else {
             println!("{}", entry.as_table_entry(length));
         }
     }
@@ -308,7 +323,7 @@ fn list(config: Config) -> Result<(), String> {
 }
 
 fn check(config: Config) -> Result<(), String> {
-    // check   [task_name] 
+    // check   [task_name]
     if config.args.len() < 1 {
         return Err("not enough parameters".to_string());
     }
@@ -316,16 +331,16 @@ fn check(config: Config) -> Result<(), String> {
     let checklist: Result<String, Error> = fs::read_to_string(&config.file_path);
     let checklist: String = match checklist {
         Ok(content) => content,
-        Err(e) => return Err(e.to_string())
+        Err(e) => return Err(e.to_string()),
     };
 
     let mut found = false;
-    let mut entry = TaskEntry { 
-        task_name: config.args[0].clone(), 
-        due_date: Local::now().naive_local().into(), 
-        interval: 0 
+    let mut entry = TaskEntry {
+        task_name: config.args[0].clone(),
+        due_date: Local::now().naive_local().into(),
+        interval: 0,
     }; // defaults, so compiler does not complain
-    
+
     for line in checklist.lines() {
         if line.starts_with(format!("{}{}", config.args[0], ',').as_str()) {
             found = true;
@@ -346,16 +361,16 @@ fn check(config: Config) -> Result<(), String> {
     let today: NaiveDate = Local::now().naive_local().into();
     let new_due_date = match today.checked_add_signed(Duration::days(entry.interval.into())) {
         Some(content) => content,
-        None => return Err("could not calculate new due date".to_string())
+        None => return Err("could not calculate new due date".to_string()),
     };
 
     add(Config {
         file_path: config.file_path,
-        args: vec!(
-            config.args[0].clone(), // task_name
-            new_due_date.to_string(), // due_date
+        args: vec![
+            config.args[0].clone(),     // task_name
+            new_due_date.to_string(),   // due_date
             entry.interval.to_string(), // interval
-        ),
+        ],
     })?;
 
     Ok(())
