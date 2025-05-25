@@ -1,12 +1,14 @@
 [package]
 name = "checklist"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+license = "GPLv3"
+description = "A simple checklist CLI to organize your TODOs."
+readme = "README.md"
+repository = "https://github.com/RolandNeuber/checklist"
+keywords = ["console", "todo", "checklist", "cli"]
+categories = ["command-line-utility"]
 
 [dependencies]
-chrono = "0.4.38"
-colored = "2.1.0"
-const-str = "0.5.7"
-once_cell = "1.20.2"
-regex = "1.11.1"
-regex_static = "0.1.1"
+chrono = "0.4.41"
+colored = "3.0.0"

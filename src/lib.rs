@@ -2,6 +2,8 @@ use chrono::{Duration, Local, NaiveDate};
 use colored::Colorize;
 use std::cmp;
 use std::env;
+use std::env::VarError;
+use std::fmt::Display;
 use std::fs;
 use std::io::Error;
 use std::string::ToString;
@@ -13,15 +15,15 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn build(mut args: Vec<String>) -> Result<Config, &'static str> {
-        let file_path = match env::var("CHECKLIST_FILE") {
-            Ok(var) => var,
-            Err(msg) => panic!("{msg}"),
-        };
+    /// # Errors
+    ///
+    /// Returns an error when the env var `CHECKLIST_FILE` is not set.
+    pub fn build(mut args: Vec<String>) -> Result<Self, VarError> {
+        let file_path = env::var("CHECKLIST_FILE")?;
 
         args = args.drain(2..).collect();
 
-        Ok(Config { file_path, args })
+        Ok(Self { file_path, args })
     }
 }
 
@@ -45,7 +47,7 @@ impl TaskEntry {
         )
     }
 
-    fn deserialize(serialization: &str) -> Result<TaskEntry, String> {
+    fn deserialize(serialization: &str) -> Result<Self, String> {
         let v: Vec<&str> = serialization.split(',').collect();
         if v.len() != 3 {
             return Err(
@@ -53,7 +55,7 @@ impl TaskEntry {
             );
         }
 
-        let due_date = match NaiveDate::parse_from_str(&v[1], "%Y-%m-%d") {
+        let due_date = match NaiveDate::parse_from_str(v[1], "%Y-%m-%d") {
             Ok(date) => date,
             Err(e) => return Err(e.to_string()),
         };
@@ -63,25 +65,25 @@ impl TaskEntry {
             Err(e) => return Err(e.to_string()),
         };
 
-        Ok(TaskEntry {
+        Ok(Self {
             task_name: v[0].to_string(),
             due_date,
             interval,
         })
     }
 
-    #[warn(dead_code)]
-    fn build(task_name: String, due_date: String, interval: u32) -> Result<TaskEntry, String> {
+    #[allow(dead_code)]
+    fn build(task_name: String, due_date: &str, interval: u32) -> Result<Self, String> {
         if task_name.contains(',') {
             return Err("task name must not contain commas".to_string());
         }
 
-        let due_date = match NaiveDate::parse_from_str(&due_date, "%Y-%m-%d") {
+        let due_date = match NaiveDate::parse_from_str(due_date, "%Y-%m-%d") {
             Ok(date) => date,
             Err(e) => return Err(e.to_string()),
         };
 
-        Ok(TaskEntry {
+        Ok(Self {
             task_name,
             due_date,
             interval,
@@ -105,20 +107,23 @@ impl TaskEntry {
     }
 }
 
-impl ToString for TaskEntry {
-    fn to_string(&self) -> String {
-        format!(
+impl Display for TaskEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
             "Task name: {}, Due until: {}, Interval: {} days",
             &self.task_name, &self.due_date, &self.interval
         )
     }
 }
 
+#[allow(dead_code)]
 struct TaskTable {
     tasks: Vec<TaskEntry>,
 }
 
 impl TaskTable {
+    #[allow(dead_code)]
     fn serialize(&self) -> String {
         let mut length: [usize; 3] = [0; 3];
         for entry in &self.tasks {
@@ -132,22 +137,26 @@ impl TaskTable {
             serialization = format!("{}\n{}", serialization, task.as_table_entry(length));
         }
 
-        serialization.to_string()
+        serialization
     }
 
-    fn deserialize(serialization: &str) -> Result<TaskTable, String> {
+    #[allow(dead_code)]
+    fn deserialize(serialization: &str) -> Result<Self, String> {
         let mut tasks = vec![];
         for line in serialization.lines() {
             tasks.push(TaskEntry::deserialize(line)?);
         }
 
-        Ok(TaskTable { tasks })
+        Ok(Self { tasks })
     }
 }
 
-pub fn parse_command(
-    command_str: &str,
-) -> Result<fn(config: Config) -> Result<(), String>, &'static str> {
+type Command = fn(config: Config) -> Result<(), String>;
+
+/// # Errors
+///
+/// Returns an error when an unknown command is supplied.
+pub fn parse_command(command_str: &str) -> Result<Command, &'static str> {
     match command_str {
         "add" => Ok(add),
         "remove" => Ok(remove),
@@ -202,14 +211,14 @@ fn add(config: Config) -> Result<(), String> {
         config.file_path,
         format!("{}\n{}", entry.serialize(), checklist),
     ) {
-        Ok(_) => Ok(()),
+        Ok(()) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
 }
 
 fn remove(config: Config) -> Result<(), String> {
     // remove  [task_name]
-    if config.args.len() < 1 {
+    if config.args.is_empty() {
         return Err("not enough parameters".to_string());
     }
 
@@ -223,14 +232,14 @@ fn remove(config: Config) -> Result<(), String> {
     let mut found = false;
     let mut first_line = true;
     for line in checklist.lines() {
-        if !line.starts_with(format!("{}{}", config.args[0], ',').as_str()) {
+        if line.starts_with(format!("{}{}", config.args[0], ',').as_str()) {
+            found = true;
+        } else {
             if !first_line {
-                new_checklist.push_str("\n");
+                new_checklist.push('\n');
             }
             new_checklist.push_str(line);
             first_line = false;
-        } else {
-            found = true;
         }
     }
 
@@ -240,14 +249,15 @@ fn remove(config: Config) -> Result<(), String> {
 
     if let Err(e) = fs::write(config.file_path, new_checklist) {
         return Err(e.to_string());
-    };
+    }
 
     Ok(())
 }
 
+#[allow(dead_code)]
 fn pop(file_path: &str, task_name: &str) -> Result<TaskEntry, String> {
     // remove  [task_name]
-    let checklist: Result<String, Error> = fs::read_to_string(&file_path);
+    let checklist: Result<String, Error> = fs::read_to_string(file_path);
     let checklist: String = match checklist {
         Ok(content) => content,
         Err(e) => return Err(e.to_string()),
@@ -258,29 +268,30 @@ fn pop(file_path: &str, task_name: &str) -> Result<TaskEntry, String> {
     let mut first_line = true;
     let mut entry = "";
     for line in checklist.lines() {
-        if !line.starts_with(format!("{}{}", task_name, ',').as_str()) {
+        if line.starts_with(format!("{}{}", task_name, ',').as_str()) {
+            found = true;
+            entry = line;
+        } else {
             if !first_line {
-                new_checklist.push_str("\n");
+                new_checklist.push('\n');
             }
             new_checklist.push_str(line);
             first_line = false;
-        } else {
-            found = true;
-            entry = line;
         }
     }
 
     if !found {
-        return Err(format!("cannot find task named \"{}\"", task_name));
+        return Err(format!("cannot find task named \"{task_name}\""));
     }
 
     if let Err(e) = fs::write(file_path, new_checklist) {
         return Err(e.to_string());
-    };
+    }
 
-    Ok(TaskEntry::deserialize(entry)?)
+    TaskEntry::deserialize(entry)
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn list(config: Config) -> Result<(), String> {
     // list
     let checklist: String = match fs::read_to_string(&config.file_path) {
@@ -288,15 +299,18 @@ fn list(config: Config) -> Result<(), String> {
         Err(e) => return Err(e.to_string()),
     };
 
-    let mut length: [usize; 3] = [0; 3];
+    let mut lengths: [usize; 3] = [0; 3];
     for line in checklist.lines() {
         let v: Vec<&str> = line.split(',').collect();
         for i in 0..3 {
-            length[i] = cmp::max(length[i], v[i].len());
+            lengths[i] = cmp::max(lengths[i], v[i].len());
         }
     }
-    for i in 0..3 {
-        length[i] = cmp::max(length[i], ["task", "due until", "interval"][i].len());
+    for (i, length) in lengths.iter_mut().enumerate() {
+        *length = *cmp::max(
+            &mut *length,
+            &mut ["task", "due until", "interval"][i].len(),
+        );
     }
 
     println!(
@@ -304,18 +318,18 @@ fn list(config: Config) -> Result<(), String> {
         "task",
         "due until",
         "interval",
-        width1 = length[0],
-        width2 = length[1],
-        width3 = length[2]
+        width1 = lengths[0],
+        width2 = lengths[1],
+        width3 = lengths[2]
     );
-    println!("{}", "-".repeat(length.iter().sum::<usize>() + 2));
+    println!("{}", "-".repeat(lengths.iter().sum::<usize>() + 2));
     let now = Local::now().date_naive();
     for line in checklist.lines() {
         let entry = TaskEntry::deserialize(line)?;
         if entry.due_date < now {
-            println!("{}", entry.as_table_entry(length).red().bold());
+            println!("{}", entry.as_table_entry(lengths).red().bold());
         } else {
-            println!("{}", entry.as_table_entry(length));
+            println!("{}", entry.as_table_entry(lengths));
         }
     }
 
@@ -324,7 +338,7 @@ fn list(config: Config) -> Result<(), String> {
 
 fn check(config: Config) -> Result<(), String> {
     // check   [task_name]
-    if config.args.len() < 1 {
+    if config.args.is_empty() {
         return Err("not enough parameters".to_string());
     }
 
@@ -359,9 +373,8 @@ fn check(config: Config) -> Result<(), String> {
     }
 
     let today: NaiveDate = Local::now().naive_local().into();
-    let new_due_date = match today.checked_add_signed(Duration::days(entry.interval.into())) {
-        Some(content) => content,
-        None => return Err("could not calculate new due date".to_string()),
+    let Some(new_due_date) = today.checked_add_signed(Duration::days(entry.interval.into())) else {
+        return Err("could not calculate new due date".to_string());
     };
 
     add(Config {
@@ -376,9 +389,10 @@ fn check(config: Config) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn uncheck(config: Config) -> Result<(), String> {
     // uncheck [task_name]
-    if config.args.len() < 1 {
+    if config.args.is_empty() {
         return Err("not enough parameters".to_string());
     }
     Ok(())
