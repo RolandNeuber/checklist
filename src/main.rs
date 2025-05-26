@@ -18,12 +18,12 @@ fn main() {
         Err(msg) => panic!("{msg}"),
     };
 
-    let config = Config::build(args).unwrap_or_else(|err| {
+    let mut config = Config::build(args).unwrap_or_else(|err| {
         eprintln!("Problem with command arguments: {err}");
         process::exit(1);
     });
 
-    if let Err(msg) = command(config) {
+    if let Err(msg) = command(&mut config) {
         eprintln!("{msg}");
         process::exit(1);
     }

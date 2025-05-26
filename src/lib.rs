@@ -1,16 +1,17 @@
 use chrono::{Duration, Local, NaiveDate};
 use colored::Colorize;
+use directories_next::ProjectDirs;
 use std::cmp;
 use std::env;
 use std::env::VarError;
 use std::fmt::Display;
 use std::fs;
 use std::io::Error;
+use std::path::PathBuf;
 use std::string::ToString;
 
-#[derive(Clone)]
 pub struct Config {
-    file_path: String,
+    file_path: PathBuf,
     args: Vec<String>,
 }
 
@@ -19,7 +20,15 @@ impl Config {
     ///
     /// Returns an error when the env var `CHECKLIST_FILE` is not set.
     pub fn build(mut args: Vec<String>) -> Result<Self, VarError> {
-        let file_path = env::var("CHECKLIST_FILE")?;
+        let file_path;
+        if let Ok(path) = env::var("CHECKLIST_FILE") {
+            file_path = PathBuf::from(&path);
+        } else {
+            file_path = ProjectDirs::from("", "", "Checklist")
+            .expect("Could not generate project directory path, consider manually specifying a path using the CHECKLIST_FILE env variable.")
+            .data_dir()
+            .to_path_buf();
+        }
 
         args = args.drain(2..).collect();
 
@@ -151,7 +160,7 @@ impl TaskTable {
     }
 }
 
-type Command = fn(config: Config) -> Result<(), String>;
+type Command = fn(config: &mut Config) -> Result<(), String>;
 
 /// # Errors
 ///
@@ -167,7 +176,7 @@ pub fn parse_command(command_str: &str) -> Result<Command, &'static str> {
     }
 }
 
-fn add(config: Config) -> Result<(), String> {
+fn add(config: &mut Config) -> Result<(), String> {
     // add     [task_name] [relative_start_date] [interval](optional, once)
 
     if config.args.len() < 2 {
@@ -208,7 +217,7 @@ fn add(config: Config) -> Result<(), String> {
     )?;
 
     match fs::write(
-        config.file_path,
+        config.file_path.clone(),
         format!("{}\n{}", entry.serialize(), checklist),
     ) {
         Ok(()) => Ok(()),
@@ -216,7 +225,7 @@ fn add(config: Config) -> Result<(), String> {
     }
 }
 
-fn remove(config: Config) -> Result<(), String> {
+fn remove(config: &mut Config) -> Result<(), String> {
     // remove  [task_name]
     if config.args.is_empty() {
         return Err("not enough parameters".to_string());
@@ -247,52 +256,14 @@ fn remove(config: Config) -> Result<(), String> {
         return Err(format!("cannot find task named \"{}\"", config.args[0]));
     }
 
-    if let Err(e) = fs::write(config.file_path, new_checklist) {
+    if let Err(e) = fs::write(config.file_path.clone(), new_checklist) {
         return Err(e.to_string());
     }
 
     Ok(())
 }
 
-#[allow(dead_code)]
-fn pop(file_path: &str, task_name: &str) -> Result<TaskEntry, String> {
-    // remove  [task_name]
-    let checklist: Result<String, Error> = fs::read_to_string(file_path);
-    let checklist: String = match checklist {
-        Ok(content) => content,
-        Err(e) => return Err(e.to_string()),
-    };
-
-    let mut new_checklist = String::new();
-    let mut found = false;
-    let mut first_line = true;
-    let mut entry = "";
-    for line in checklist.lines() {
-        if line.starts_with(format!("{}{}", task_name, ',').as_str()) {
-            found = true;
-            entry = line;
-        } else {
-            if !first_line {
-                new_checklist.push('\n');
-            }
-            new_checklist.push_str(line);
-            first_line = false;
-        }
-    }
-
-    if !found {
-        return Err(format!("cannot find task named \"{task_name}\""));
-    }
-
-    if let Err(e) = fs::write(file_path, new_checklist) {
-        return Err(e.to_string());
-    }
-
-    TaskEntry::deserialize(entry)
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn list(config: Config) -> Result<(), String> {
+fn list(config: &mut Config) -> Result<(), String> {
     // list
     let checklist: String = match fs::read_to_string(&config.file_path) {
         Ok(content) => content,
@@ -336,7 +307,7 @@ fn list(config: Config) -> Result<(), String> {
     Ok(())
 }
 
-fn check(config: Config) -> Result<(), String> {
+fn check(config: &mut Config) -> Result<(), String> {
     // check   [task_name]
     if config.args.is_empty() {
         return Err("not enough parameters".to_string());
@@ -366,7 +337,7 @@ fn check(config: Config) -> Result<(), String> {
         return Err(format!("cannot find task named \"{}\"", config.args[0]));
     }
 
-    remove(config.clone())?;
+    remove(config)?;
 
     if entry.interval == 0 {
         return Ok(());
@@ -377,8 +348,8 @@ fn check(config: Config) -> Result<(), String> {
         return Err("could not calculate new due date".to_string());
     };
 
-    add(Config {
-        file_path: config.file_path,
+    add(&mut Config {
+        file_path: config.file_path.clone(),
         args: vec![
             config.args[0].clone(),     // task_name
             new_due_date.to_string(),   // due_date
@@ -389,8 +360,7 @@ fn check(config: Config) -> Result<(), String> {
     Ok(())
 }
 
-#[allow(clippy::needless_pass_by_value)]
-fn uncheck(config: Config) -> Result<(), String> {
+fn uncheck(config: &mut Config) -> Result<(), String> {
     // uncheck [task_name]
     if config.args.is_empty() {
         return Err("not enough parameters".to_string());
