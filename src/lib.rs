@@ -3,10 +3,11 @@ use colored::Colorize;
 use directories_next::ProjectDirs;
 use std::cmp;
 use std::env;
-use std::env::VarError;
 use std::fmt::Display;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::Error;
+use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::string::ToString;
 
@@ -18,16 +19,27 @@ pub struct Config {
 impl Config {
     /// # Errors
     ///
-    /// Returns an error when the env var `CHECKLIST_FILE` is not set.
-    pub fn build(mut args: Vec<String>) -> Result<Self, VarError> {
+    /// Returns an error when the env var `CHECKLIST_FILE` is not set and a project directory could not be generated automatically.
+    /// Returns an error when the determined checklist file could not be touched (e.g. generated if it did not exist).
+    pub fn build(mut args: Vec<String>) -> Result<Self, String> {
         let file_path;
         if let Ok(path) = env::var("CHECKLIST_FILE") {
             file_path = PathBuf::from(&path);
         } else {
             file_path = ProjectDirs::from("", "", "Checklist")
-            .expect("Could not generate project directory path, consider manually specifying a path using the CHECKLIST_FILE env variable.")
+            .ok_or_else(|| "Could not generate project directory path, consider manually specifying a path using the CHECKLIST_FILE env variable.".to_owned())?
             .data_dir()
             .to_path_buf();
+        }
+
+        match OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&file_path)
+        {
+            Ok(_) => (),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
+            Err(msg) => return Err(msg.to_string()),
         }
 
         args = args.drain(2..).collect();
